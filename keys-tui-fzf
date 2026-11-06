@@ -1,0 +1,71 @@
+#!/bin/bash
+# TUI-справочник клавиш tmux на fzf — для ПРЯМОГО запуска в терминале
+# В tmux display-popup используйте keys-tui (whiptail) — fzf не работает с alternate screen в popup
+# Требует: fzf (apt install fzf / brew install fzf)
+
+set -euo pipefail
+
+KEYS_CONF="${HOME}/.config/tmux/keys.conf"
+
+if ! command -v fzf >/dev/null 2>&1; then
+  echo "fzf не установлен. Установите: apt install fzf"
+  exit 1
+fi
+
+# ┌─────────────────────────────────────────────────────────────────┐
+# ПАРСИНГ — строим строки для fzf: "группа<TAB>клавиша<TAB>описание<TAB>команда"
+# ┌─────────────────────────────────────────────────────────────────┐
+entries=()
+current_group=""
+
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line#"${line%%[![:space:]]*}"}"
+  [ -z "$line" ] && continue
+  [[ "$line" =~ ^# ]] && continue
+
+  if [[ "$line" =~ ^\[(.+)\]$ ]]; then
+    current_group="${BASH_REMATCH[1]}"
+    continue
+  fi
+
+  IFS='|' read -r key desc cmd <<< "$line"
+  [ -z "$key" ] && continue
+
+  # Цветная группа для отображения (ANSI)
+  case "$current_group" in
+    Сессии)      grp_color=$'\033[36m' ;;    # cyan
+    Окна)        grp_color=$'\033[33m' ;;    # yellow
+    Панели)      grp_color=$'\033[35m' ;;    # magenta
+    Копирование) grp_color=$'\033[32m' ;;    # green
+    Прочее)      grp_color=$'\033[34m' ;;    # blue
+    *)           grp_color=$'\033[37m' ;;
+  esac
+  reset=$'\033[0m'
+
+  # Формат для fzf: 4 поля через TAB
+  printf -v key_colored "%s%-12s%s" "$grp_color" "$key" "$reset"
+  entries+=("${current_group}\t${key_colored}\t${desc}\t${cmd}")
+done < "$KEYS_CONF"
+
+# ┌─────────────────────────────────────────────────────────────────┐
+# ZAPUSK fzf
+# ┌─────────────────────────────────────────────────────────────────┐
+printf '%s\n' "${entries[@]}" | fzf \
+  --ansi \
+  --multi \
+  --prompt='🔍  ' \
+  --header=$'tmux keys  •  j/k навигация  •  Enter=копировать команду  •  Ctrl-y=скопировать ключ  •  Esc/q=выход\n' \
+  --bind='j:down,k:up,ctrl-u:half-page-up,ctrl-d:half-page-down,?:toggle-preview' \
+  --bind='enter:execute-silent(echo {-4} | tr -d "\n" | xclip -selection clipboard 2>/dev/null || echo {-4} | tr -d "\n" | wl-copy 2>/dev/null || echo {-4} | tr -d "\n" | pbcopy 2>/dev/null)+abort' \
+  --bind='ctrl-y:execute-silent(echo {-2} | sed "s/\x1b\[[0-9;]*m//g" | tr -d "\n" | xclip -selection clipboard 2>/dev/null || echo {-2} | sed "s/\x1b\[[0-9;]*m//g" | tr -d "\n" | wl-copy 2>/dev/null || echo {-2} | sed "s/\x1b\[[0-9;]*m//g" | tr -d "\n" | pbcopy 2>/dev/null)+abort' \
+  --preview='echo {-4} | sed "s/\\\\;/;/g"' \
+  --preview-window='right:50%:wrap:border-left' \
+  --layout=reverse \
+  --height=85% \
+  --border=rounded \
+  --color='fg:#e0e0e0,bg:#1a1a1a,hl:#89b4fa,fg+:#ffffff,bg+:#2a2a2a,hl+:#f9e2af,info:#fab387,prompt:#a6e3a1,pointer:#f5c2e7,marker:#f9e2af,border:#45475a,header:#94e2d5' \
+  --delimiter=$'\t' \
+  --with-nth=2,3 \
+  --exit-0
+
+exit 0

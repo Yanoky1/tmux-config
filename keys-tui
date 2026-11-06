@@ -1,0 +1,82 @@
+#!/bin/bash
+# TUI-справочник клавиш tmux: читает keys.conf
+# Использует whiptail — работает надежно в tmux display-popup
+# fzf-версия доступна как keys-tui-fzf для прямого запуска в терминале
+
+set -euo pipefail
+
+KEYS_CONF="${HOME}/.config/tmux/keys.conf"
+
+# ┌─────────────────────────────────────────────────────────────────┐
+# ЦВЕТА (NEWT palette) — классический терминал: чёрный фон, зелёный текст
+# ┌─────────────────────────────────────────────────────────────────┐
+export NEWT_COLORS='
+root=green,black
+window=green,black
+border=brightgreen,black
+title=brightwhite,black
+button=black,green
+actbutton=brightgreen,black
+listbox=green,black
+actlistbox=black,brightgreen
+textbox=green,black
+acttextbox=black,brightgreen
+helpline=brightblack,black
+roottext=green,black
+'
+
+# ┌─────────────────────────────────────────────────────────────────┐
+# РАЗМЕРЫ — адаптивные под терминал
+# ┌─────────────────────────────────────────────────────────────────┐
+term_lines=$(tput lines 2>/dev/null || echo 40)
+term_cols=$(tput cols 2>/dev/null || echo 120)
+
+height=$term_lines
+width=$term_cols
+
+[ "$height" -lt 22 ] && height=22
+[ "$width" -lt 76 ] && width=76
+
+menu_height=$(( height - 7 ))
+[ "$menu_height" -lt 12 ] && menu_height=12
+
+# ┌─────────────────────────────────────────────────────────────────┐
+# ПАРСИНГ keys.conf — строим массив для whiptail
+# ┌─────────────────────────────────────────────────────────────────┐
+menu_items=()
+
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line#"${line%%[![:space:]]*}"}"
+  [ -z "$line" ] && continue
+  [[ "$line" =~ ^# ]] && continue
+
+  if [[ "$line" =~ ^\[(.+)\]$ ]]; then
+    group="${BASH_REMATCH[1]}"
+    # Заголовок группы: показываем в ОБОИХ колонках, чтобы не было пустых строк
+    header="── $group ──"
+    menu_items+=("$header" "$header")
+    continue
+  fi
+
+  IFS='|' read -r key desc _cmd <<< "$line"
+  [ -z "$key" ] && continue
+
+  # Клавиша: выравниваем по 12 символам для ровной колонки
+  printf -v key_fmt "%-12s" "$key"
+  menu_items+=("$key_fmt" "$desc")
+done < "$KEYS_CONF"
+
+# ┌─────────────────────────────────────────────────────────────────┐
+# ЗАПУСК МЕНЮ
+# ┌─────────────────────────────────────────────────────────────────┐
+helpline=" ↑↓ — навигация   Enter — выбрать   Esc/q — закрыть   Tab — фокус на кнопку "
+
+whiptail --title " ⌨  tmux keybindings  " \
+         --menu "$helpline" \
+         "$height" "$width" "$menu_height" \
+         --ok-button " Закрыть " \
+         --nocancel \
+         "${menu_items[@]}" \
+         3>&1 1>&2 2>&3
+
+exit 0
